@@ -1,5 +1,5 @@
 """
-US Intraday ORB Scanner – NASDAQ 100 Top 10
+US Intraday ORB Scanner – NASDAQ 100 Top 27
 15-Minute Opening Range Breakout with Black-Scholes Greeks (0-DTE)
 Executes after 9:45 AM ET.
 """
@@ -17,7 +17,14 @@ from scipy.stats import norm
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-TICKERS = ["AAPL", "NVDA", "MSFT", "AMZN", "META", "TSLA", "GOOGL", "AVGO", "NFLX", "AMD"]
+TICKERS = [
+    "NVDA", "AAPL", "MSFT", "AMZN", "META",
+    "GOOGL", "GOOG", "TSLA", "AVGO", "NFLX",
+    "COST", "TMUS", "AMD", "CSCO", "ADBE",
+    "PEP", "TXN", "QCOM", "INTU", "AMAT",
+    "ISRG", "BKNG", "AMGN", "ADP", "MRVL",
+    "PANW", "KLAC",
+]
 ET = pytz.timezone("America/New_York")
 MARKET_OPEN = {"hour": 9, "minute": 30}
 ORB_END = {"hour": 9, "minute": 45}
@@ -77,9 +84,10 @@ def estimate_iv(ticker_info: dict, fallback: float = 0.35) -> float:
 def _avg_5d_volume(ticker: str) -> float:
     try:
         hist = yf.download(ticker, period="6d", interval="1d", progress=False, auto_adjust=True)
+        vol = hist["Volume"].squeeze()
         if len(hist) >= 5:
-            return float(hist["Volume"].iloc[-6:-1].mean())
-        return float(hist["Volume"].mean()) if not hist.empty else 0.0
+            return float(vol.iloc[-6:-1].mean())
+        return float(vol.mean()) if not hist.empty else 0.0
     except Exception as exc:
         log.warning("5-day volume fetch failed for %s: %s", ticker, exc)
         return 0.0
@@ -130,10 +138,27 @@ def fetch_orb_data(ticker: str):
             "orb_low": orb_low,
             "current_price": current_price,
             "current_volume": current_volume,
+            "df": df,
         }
     except Exception as exc:
         log.error("%s: fetch_orb_data error – %s", ticker, exc)
         return None
+
+
+def _find_entry_time(df: pd.DataFrame, orb_high: float, orb_low: float, signal: str) -> str:
+    """Return HH:MM ET of the first post-ORB candle that triggered the breakout."""
+    post_orb = df[
+        (df.index.hour > 9) |
+        ((df.index.hour == 9) & (df.index.minute >= 45))
+    ]
+    close = post_orb["Close"].squeeze()
+    if signal == "BUY CALL":
+        triggered = post_orb[close > orb_high]
+    elif signal == "BUY PUT":
+        triggered = post_orb[close < orb_low]
+    else:
+        return "–"
+    return triggered.index[0].strftime("%H:%M") if not triggered.empty else "–"
 
 
 def run_scanner() -> pd.DataFrame:
@@ -151,6 +176,7 @@ def run_scanner() -> pd.DataFrame:
         orb_low       = data["orb_low"]
         current_price = data["current_price"]
         current_vol   = data["current_volume"]
+        intraday_df   = data["df"]
 
         # Signal
         if current_price > orb_high:
@@ -165,6 +191,8 @@ def run_scanner() -> pd.DataFrame:
             signal = "NEUTRAL"
             entry_level = (orb_high + orb_low) / 2
             option_type = "call"
+
+        entry_time = _find_entry_time(intraday_df, orb_high, orb_low, signal)
 
         # Greeks
         try:
@@ -194,7 +222,9 @@ def run_scanner() -> pd.DataFrame:
             "ORB High":       round(orb_high, 2),
             "ORB Low":        round(orb_low, 2),
             "Entry Level":    round(entry_level, 2),
+            "Entry Time":     entry_time,
             "Current Price":  round(current_price, 2),
+            "Diff":           round(current_price - entry_level, 2),
             "Delta":          round(delta, 3),
             "Theta/Hr":       round(theta_hr, 4),
             "IV":             round(sigma, 3),
@@ -208,9 +238,10 @@ def run_scanner() -> pd.DataFrame:
 
     df = pd.DataFrame(records)
 
-    # Sort: signals first (CALL/PUT before NEUTRAL), then by Rel Vol desc
-    df["_sig_order"] = df["Signal"].apply(lambda s: 0 if s != "NEUTRAL" else 1)
-    df = df.sort_values(["_sig_order", "Rel Vol"], ascending=[True, False]).drop(columns="_sig_order")
+    # Exclude NEUTRAL tickers; sort by Entry Time asc (– values go last)
+    df = df[df["Signal"] != "NEUTRAL"].copy()
+    df["_et_sort"] = df["Entry Time"].apply(lambda t: t if t != "–" else "99:99")
+    df = df.sort_values("_et_sort", ascending=True).drop(columns="_et_sort")
     df = df.head(MAX_ROWS).reset_index(drop=True)
 
     log.info("Scan complete – %d rows returned", len(df))

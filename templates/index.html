@@ -148,7 +148,7 @@
       color: var(--red);
       display: none;
     }
-    #too-early-box {
+    #too-early-box, #market-closed-box {
       margin: 16px;
       padding: 16px;
       background: var(--card);
@@ -157,8 +157,8 @@
       text-align: center;
       display: none;
     }
-    #too-early-box h2 { font-size: 16px; margin-bottom: 8px; }
-    #too-early-box p  { color: var(--muted); font-size: 13px; }
+    #too-early-box h2, #market-closed-box h2 { font-size: 16px; margin-bottom: 8px; }
+    #too-early-box p, #market-closed-box p   { color: var(--muted); font-size: 13px; }
     .countdown { font-size: 28px; font-weight: 700; color: var(--blue); margin: 12px 0; }
 
     footer {
@@ -194,6 +194,11 @@
 </div>
 
 <div id="error-box"></div>
+<div id="market-closed-box">
+  <h2>Market Closed</h2>
+  <p>Scanning resumes at <strong>9:25 AM ET</strong> (Mon–Fri)</p>
+  <div style="margin-top:10px;font-size:12px;color:var(--muted);" id="srv-time-closed">–</div>
+</div>
 <div id="too-early-box">
   <h2>⏳ Market Not Yet Open</h2>
   <p>ORB data is available after <strong>9:45 AM ET</strong></p>
@@ -211,8 +216,8 @@
     <table>
       <thead>
         <tr>
-          <th>Ticker</th><th>Signal</th><th>Entry Level</th>
-          <th>ORB High</th><th>ORB Low</th><th>Current $</th>
+          <th>Ticker</th><th>Signal</th><th>Entry Level</th><th>Entry Time</th>
+          <th>ORB High</th><th>ORB Low</th><th>Current $</th><th>Diff</th>
           <th>Delta</th><th>Theta/Hr</th><th>IV</th>
           <th>Rel Vol</th><th>Curr Vol</th>
         </tr>
@@ -254,7 +259,9 @@ function buildCards(rows) {
       </div>
       <div class="card-grid">
         <div class="kv"><span class="k">Entry</span><span class="v">${r['Entry Level']}</span></div>
+        <div class="kv"><span class="k">Time</span><span class="v">${r['Entry Time']}</span></div>
         <div class="kv"><span class="k">Current</span><span class="v ${priceDir}">${r['Current Price']}</span></div>
+        <div class="kv"><span class="k">Diff</span><span class="v ${r.Diff > 0 ? 'up' : r.Diff < 0 ? 'down' : ''}">${r.Diff > 0 ? '+' : ''}${r.Diff.toFixed(2)}</span></div>
         <div class="kv"><span class="k">Rel Vol</span><span class="v ${r['Rel Vol'] >= 1.5 ? 'hi' : ''}">${r['Rel Vol'].toFixed(2)}</span></div>
         <div class="kv"><span class="k">ORB High</span><span class="v">${r['ORB High']}</span></div>
         <div class="kv"><span class="k">ORB Low</span><span class="v">${r['ORB Low']}</span></div>
@@ -277,9 +284,11 @@ function buildTable(rows) {
       <td><strong>${r.Ticker}</strong></td>
       <td class="${sc}">${r.Signal}</td>
       <td>${r['Entry Level']}</td>
+      <td>${r['Entry Time']}</td>
       <td>${r['ORB High']}</td>
       <td>${r['ORB Low']}</td>
       <td>${r['Current Price']}</td>
+      <td class="${r.Diff > 0 ? 'buy-call' : r.Diff < 0 ? 'buy-put' : ''}">${r.Diff > 0 ? '+' : ''}${r.Diff.toFixed(2)}</td>
       <td>${r.Delta.toFixed(3)}</td>
       <td>${r['Theta/Hr'].toFixed(4)}</td>
       <td>${(r.IV * 100).toFixed(1)}%</td>
@@ -320,55 +329,68 @@ function startProgressBar() {
   }, 50);
 }
 
+function hideAll() {
+  ['loading','content','error-box','too-early-box','market-closed-box'].forEach(
+    id => document.getElementById(id).style.display = 'none'
+  );
+}
+
 async function fetchData() {
   try {
     const res = await fetch('/api/scan');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    document.getElementById('srv-time').textContent  = data.server_time;
-    document.getElementById('scan-time').textContent = data.scan_time;
+    document.getElementById('srv-time').textContent  = data.server_time || '–';
+    document.getElementById('scan-time').textContent = data.scan_time   || '–';
 
     const badge = document.getElementById('status-badge');
 
+    if (data.status === 'market_closed') {
+      hideAll();
+      document.getElementById('market-closed-box').style.display = 'block';
+      document.getElementById('srv-time-closed').textContent = 'Server time: ' + data.server_time;
+      badge.textContent = 'Closed';
+      badge.className = 'status-badge';
+      return false; // stop auto-refresh
+    }
+
     if (data.status === 'too_early') {
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('content').style.display = 'none';
+      hideAll();
       document.getElementById('too-early-box').style.display = 'block';
       updateCountdown(data.server_time);
       badge.textContent = 'Pre-Market';
       badge.className = 'status-badge';
-      return;
+      return true;
     }
 
-    document.getElementById('too-early-box').style.display = 'none';
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('error-box').style.display = 'none';
+    hideAll();
     document.getElementById('content').style.display = 'block';
-
     document.getElementById('row-count').textContent = data.rows.length;
     badge.textContent = 'LIVE';
     badge.className = 'live';
 
     buildCards(data.rows);
     buildTable(data.rows);
+    return true;
 
   } catch (e) {
     showError(e.message);
+    return true;
   }
 }
 
 function scheduleRefresh() {
   startProgressBar();
   clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(() => {
-    fetchData();
-    scheduleRefresh();
+  refreshTimer = setTimeout(async () => {
+    const keepGoing = await fetchData();
+    if (keepGoing) scheduleRefresh();
   }, REFRESH);
 }
 
 // Initial load
-fetchData().then(scheduleRefresh);
+fetchData().then(keepGoing => { if (keepGoing) scheduleRefresh(); });
 </script>
 </body>
 </html>

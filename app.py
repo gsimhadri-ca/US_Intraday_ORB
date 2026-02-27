@@ -28,6 +28,15 @@ PORT = int(os.getenv("ORB_PORT", "5002"))
 DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
 
+def _is_market_hours(now_et: datetime) -> bool:
+    """Mon–Fri, 9:25 AM – 4:30 PM ET."""
+    if now_et.weekday() >= 5:  # Sat=5, Sun=6
+        return False
+    start = now_et.replace(hour=9,  minute=25, second=0, microsecond=0)
+    end   = now_et.replace(hour=16, minute=30, second=0, microsecond=0)
+    return start <= now_et < end
+
+
 def _get_data() -> pd.DataFrame:
     now = datetime.now(ET)
     if _cache["df"] is not None and _cache["ts"] is not None:
@@ -43,11 +52,8 @@ def _get_data() -> pd.DataFrame:
 @app.route("/")
 def index():
     now_et = datetime.now(ET)
-    market_open = now_et.replace(hour=9, minute=45, second=0, microsecond=0)
-    too_early = now_et < market_open
     return render_template(
         "index.html",
-        too_early=too_early,
         server_time=now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
         refresh_seconds=CACHE_TTL_SECONDS,
     )
@@ -56,8 +62,17 @@ def index():
 @app.route("/api/scan")
 def api_scan():
     now_et = datetime.now(ET)
-    market_open = now_et.replace(hour=9, minute=45, second=0, microsecond=0)
-    if now_et < market_open:
+
+    if not _is_market_hours(now_et):
+        return jsonify({
+            "status": "market_closed",
+            "message": "Market closed. Scanning resumes at 9:25 AM ET (Mon–Fri).",
+            "server_time": now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
+            "rows": [],
+        })
+
+    orb_ready = now_et.replace(hour=9, minute=45, second=0, microsecond=0)
+    if now_et < orb_ready:
         return jsonify({
             "status": "too_early",
             "message": "Market data available after 9:45 AM ET",
@@ -66,10 +81,7 @@ def api_scan():
         })
 
     df = _get_data()
-    rows = []
-    if not df.empty:
-        rows = df.to_dict(orient="records")
-
+    rows = df.to_dict(orient="records") if not df.empty else []
     return jsonify({
         "status": "ok",
         "server_time": now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
