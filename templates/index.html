@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>NASDAQ ORB Scanner</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --blue: #58a6ff;
+      --accent: #1f6feb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      font-size: 13px;
+      min-height: 100vh;
+    }
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { font-size: 15px; font-weight: 600; letter-spacing: .5px; }
+    header h1 span { color: var(--blue); }
+    #status-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: var(--border);
+      color: var(--muted);
+    }
+    #status-badge.live { background: #1a3a1a; color: var(--green); }
+
+    .meta {
+      padding: 8px 16px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .meta span { white-space: nowrap; }
+
+    .wrapper { padding: 12px 8px; }
+
+    /* Card per row on mobile */
+    .card-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .row-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    .row-card:hover { border-color: var(--accent); }
+    .row-card.buy-call { border-left: 3px solid var(--green); }
+    .row-card.buy-put  { border-left: 3px solid var(--red); }
+    .row-card.neutral  { border-left: 3px solid var(--muted); }
+
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .ticker { font-size: 16px; font-weight: 700; letter-spacing: 1px; }
+    .signal {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: .5px;
+    }
+    .signal.buy-call { background: #1a3a1a; color: var(--green); }
+    .signal.buy-put  { background: #3a1a1a; color: var(--red); }
+    .signal.neutral  { background: var(--border); color: var(--muted); }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px 12px;
+    }
+    .kv { display: flex; flex-direction: column; }
+    .kv .k { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+    .kv .v { font-size: 13px; font-weight: 500; margin-top: 1px; }
+    .v.up   { color: var(--green); }
+    .v.down { color: var(--red); }
+    .v.hi   { color: var(--yellow); }
+
+    /* Desktop table fallback */
+    @media (min-width: 768px) {
+      .card-list { display: none; }
+      .table-wrap { display: block !important; overflow-x: auto; }
+    }
+    .table-wrap { display: none; }
+    table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+    thead th {
+      background: var(--card);
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      padding: 8px 12px;
+      text-align: right;
+      border-bottom: 2px solid var(--border);
+      position: sticky;
+      top: 44px;
+    }
+    thead th:first-child, thead th:nth-child(2), thead th:nth-child(3) { text-align: left; }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: var(--card); }
+    tbody td { padding: 9px 12px; text-align: right; }
+    tbody td:first-child, tbody td:nth-child(2), tbody td:nth-child(3) { text-align: left; }
+    tbody td.buy-call { color: var(--green); font-weight: 600; }
+    tbody td.buy-put  { color: var(--red);   font-weight: 600; }
+    .badge-relvol { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
+    .badge-relvol.hi { background: #332200; color: var(--yellow); }
+
+    #loading {
+      display: flex; align-items: center; justify-content: center;
+      height: 200px; color: var(--muted); font-size: 14px;
+    }
+    #error-box {
+      margin: 16px;
+      padding: 12px 16px;
+      background: #3a1a1a;
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      color: var(--red);
+      display: none;
+    }
+    #too-early-box {
+      margin: 16px;
+      padding: 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-align: center;
+      display: none;
+    }
+    #too-early-box h2 { font-size: 16px; margin-bottom: 8px; }
+    #too-early-box p  { color: var(--muted); font-size: 13px; }
+    .countdown { font-size: 28px; font-weight: 700; color: var(--blue); margin: 12px 0; }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 11px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      margin-top: 20px;
+    }
+    #refresh-bar {
+      height: 2px;
+      background: var(--accent);
+      transition: width linear;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+<div id="refresh-bar"></div>
+
+<header>
+  <h1>NASDAQ <span>ORB</span> Scanner</h1>
+  <span id="status-badge">Loading…</span>
+</header>
+
+<div class="meta">
+  <span>Server: <strong id="srv-time">–</strong></span>
+  <span>Last scan: <strong id="scan-time">–</strong></span>
+  <span>Rows: <strong id="row-count">–</strong></span>
+  <span style="margin-left:auto;">Auto-refresh: {{ refresh_seconds }}s</span>
+</div>
+
+<div id="error-box"></div>
+<div id="too-early-box">
+  <h2>⏳ Market Not Yet Open</h2>
+  <p>ORB data is available after <strong>9:45 AM ET</strong></p>
+  <div class="countdown" id="countdown">–</div>
+  <p id="srv-time-early">–</p>
+</div>
+
+<div id="loading">Fetching ORB data…</div>
+
+<div class="wrapper" id="content" style="display:none;">
+  <!-- Mobile cards -->
+  <div class="card-list" id="card-list"></div>
+  <!-- Desktop table -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Ticker</th><th>Signal</th><th>Entry Level</th>
+          <th>ORB High</th><th>ORB Low</th><th>Current $</th>
+          <th>Delta</th><th>Theta/Hr</th><th>IV</th>
+          <th>Rel Vol</th><th>Curr Vol</th>
+        </tr>
+      </thead>
+      <tbody id="tbl-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<footer>NASDAQ 100 · 15-min ORB · 0-DTE · Black-Scholes Greeks · &copy; 2026</footer>
+
+<script>
+const REFRESH = {{ refresh_seconds }} * 1000;
+let refreshTimer, barTimer;
+
+function signalClass(sig) {
+  if (sig === 'BUY CALL') return 'buy-call';
+  if (sig === 'BUY PUT')  return 'buy-put';
+  return 'neutral';
+}
+
+function relvolBadge(rv) {
+  const cls = rv >= 1.5 ? 'badge-relvol hi' : 'badge-relvol';
+  return `<span class="${cls}">${rv.toFixed(2)}</span>`;
+}
+
+function buildCards(rows) {
+  const list = document.getElementById('card-list');
+  list.innerHTML = '';
+  rows.forEach(r => {
+    const sc = signalClass(r.Signal);
+    const priceDir = r['Current Price'] > r['Entry Level'] ? 'up' : (r['Current Price'] < r['Entry Level'] ? 'down' : '');
+    const card = document.createElement('div');
+    card.className = `row-card ${sc}`;
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="ticker">${r.Ticker}</span>
+        <span class="signal ${sc}">${r.Signal}</span>
+      </div>
+      <div class="card-grid">
+        <div class="kv"><span class="k">Entry</span><span class="v">${r['Entry Level']}</span></div>
+        <div class="kv"><span class="k">Current</span><span class="v ${priceDir}">${r['Current Price']}</span></div>
+        <div class="kv"><span class="k">Rel Vol</span><span class="v ${r['Rel Vol'] >= 1.5 ? 'hi' : ''}">${r['Rel Vol'].toFixed(2)}</span></div>
+        <div class="kv"><span class="k">ORB High</span><span class="v">${r['ORB High']}</span></div>
+        <div class="kv"><span class="k">ORB Low</span><span class="v">${r['ORB Low']}</span></div>
+        <div class="kv"><span class="k">Delta</span><span class="v">${r.Delta.toFixed(3)}</span></div>
+        <div class="kv"><span class="k">Theta/Hr</span><span class="v down">${r['Theta/Hr'].toFixed(4)}</span></div>
+        <div class="kv"><span class="k">IV</span><span class="v">${(r.IV * 100).toFixed(1)}%</span></div>
+        <div class="kv"><span class="k">Vol</span><span class="v">${r['Curr Vol'].toLocaleString()}</span></div>
+      </div>`;
+    list.appendChild(card);
+  });
+}
+
+function buildTable(rows) {
+  const tbody = document.getElementById('tbl-body');
+  tbody.innerHTML = '';
+  rows.forEach(r => {
+    const sc = signalClass(r.Signal);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${r.Ticker}</strong></td>
+      <td class="${sc}">${r.Signal}</td>
+      <td>${r['Entry Level']}</td>
+      <td>${r['ORB High']}</td>
+      <td>${r['ORB Low']}</td>
+      <td>${r['Current Price']}</td>
+      <td>${r.Delta.toFixed(3)}</td>
+      <td>${r['Theta/Hr'].toFixed(4)}</td>
+      <td>${(r.IV * 100).toFixed(1)}%</td>
+      <td>${relvolBadge(r['Rel Vol'])}</td>
+      <td>${r['Curr Vol'].toLocaleString()}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function showError(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'none';
+  const box = document.getElementById('error-box');
+  box.style.display = 'block';
+  box.textContent = '⚠ ' + msg;
+}
+
+function updateCountdown(srvTimeStr) {
+  const now = new Date();
+  // parse srvTimeStr e.g. "2026-02-27 09:30:15 ET"
+  const parts = srvTimeStr.replace(' ET','').split(' ');
+  const srvDate = new Date(parts[0] + 'T' + parts[1]);
+  const open = new Date(parts[0] + 'T09:45:00');
+  const diff = Math.max(0, open - srvDate);
+  const m = Math.floor(diff / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  document.getElementById('countdown').textContent = `${m}m ${s}s`;
+  document.getElementById('srv-time-early').textContent = 'Server time: ' + srvTimeStr;
+}
+
+function startProgressBar() {
+  const bar = document.getElementById('refresh-bar');
+  bar.style.transition = 'none';
+  bar.style.width = '100%';
+  setTimeout(() => {
+    bar.style.transition = `width ${REFRESH/1000}s linear`;
+    bar.style.width = '0%';
+  }, 50);
+}
+
+async function fetchData() {
+  try {
+    const res = await fetch('/api/scan');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    document.getElementById('srv-time').textContent  = data.server_time;
+    document.getElementById('scan-time').textContent = data.scan_time;
+
+    const badge = document.getElementById('status-badge');
+
+    if (data.status === 'too_early') {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'none';
+      document.getElementById('too-early-box').style.display = 'block';
+      updateCountdown(data.server_time);
+      badge.textContent = 'Pre-Market';
+      badge.className = 'status-badge';
+      return;
+    }
+
+    document.getElementById('too-early-box').style.display = 'none';
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error-box').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+
+    document.getElementById('row-count').textContent = data.rows.length;
+    badge.textContent = 'LIVE';
+    badge.className = 'live';
+
+    buildCards(data.rows);
+    buildTable(data.rows);
+
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+function scheduleRefresh() {
+  startProgressBar();
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    fetchData();
+    scheduleRefresh();
+  }, REFRESH);
+}
+
+// Initial load
+fetchData().then(scheduleRefresh);
+</script>
+</body>
+</html>
