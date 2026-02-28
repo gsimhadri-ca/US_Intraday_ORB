@@ -23,12 +23,12 @@ cd US_Intraday_ORB
 git checkout production
 ```
 
-### 2. Create venv and install dependencies
+### 2. Install dependencies (system Python, no venv)
 ```bash
-python3 -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+> No venv is used on this server — packages are installed system-wide as root.
 
 ### 3. Start the app
 ```bash
@@ -114,7 +114,6 @@ tail -f /tmp/orb.log
 
 # Restart
 cd /opt/US_Intraday_ORB
-source venv/bin/activate
 pkill -f app.py
 nohup python3 app.py > /tmp/orb.log 2>&1 &
 tail -5 /tmp/orb.log
@@ -143,8 +142,7 @@ ssh root@65.20.91.230
 cd /opt/US_Intraday_ORB
 git pull origin production
 
-# Install any new/updated dependencies
-source venv/bin/activate
+# Install any new/updated dependencies (system Python, no venv)
 pip install -r requirements.txt -q
 
 # Kill old process and restart
