@@ -114,7 +114,10 @@ tail -f /tmp/orb.log
 
 # Restart
 cd /opt/US_Intraday_ORB
+source venv/bin/activate
+pkill -f app.py
 nohup python3 app.py > /tmp/orb.log 2>&1 &
+tail -5 /tmp/orb.log
 ```
 
 ### Restarting the Tunnel
@@ -140,10 +143,19 @@ ssh root@65.20.91.230
 cd /opt/US_Intraday_ORB
 git pull origin production
 
+# Install any new/updated dependencies
+source venv/bin/activate
+pip install -r requirements.txt -q
+
 # Kill old process and restart
 pkill -f app.py
 nohup python3 app.py > /tmp/orb.log 2>&1 &
+
+# Verify startup
+tail -5 /tmp/orb.log
 ```
+
+> **When `requirements.txt` changes** (e.g. a new library is added), the `pip install` step picks it up automatically. No manual package installs needed.
 
 ---
 
