@@ -8,9 +8,39 @@ import logging
 import os
 from datetime import datetime, date
 
+import pytz
+
+# ---------------------------------------------------------------------------
+# Logging – ET timestamps, file + console (configured before scanner import)
+# ---------------------------------------------------------------------------
+class _ETFormatter(logging.Formatter):
+    _ET = pytz.timezone("America/New_York")
+
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=self._ET)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S") + ",%03d" % record.msecs
+
+
+_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(_LOG_DIR, exist_ok=True)
+
+_fmt = _ETFormatter("%(asctime)s %(levelname)s %(message)s")
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+for _handler in [
+    logging.StreamHandler(),
+    logging.FileHandler(os.path.join(_LOG_DIR, "orb.log")),
+]:
+    _handler.setFormatter(_fmt)
+    _root_logger.addHandler(_handler)
+
+# ---------------------------------------------------------------------------
+# Remaining imports (after logging is configured)
+# ---------------------------------------------------------------------------
 import pandas as pd
 import pandas_market_calendars as mcal
-import pytz
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
 
