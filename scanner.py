@@ -14,7 +14,6 @@ import pytz
 import yfinance as yf
 from scipy.stats import norm
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 TICKERS = [
@@ -253,6 +252,19 @@ def run_scanner() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # CLI: configure ET-aware logging to stderr
+    class _ETFmt(logging.Formatter):
+        def formatTime(self, record, datefmt=None):
+            dt = datetime.fromtimestamp(record.created, tz=ET)
+            if datefmt:
+                return dt.strftime(datefmt)
+            return dt.strftime("%Y-%m-%d %H:%M:%S") + ",%03d" % record.msecs
+
+    _h = logging.StreamHandler()
+    _h.setFormatter(_ETFmt("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(_h)
+    logging.getLogger().setLevel(logging.INFO)
+
     result = run_scanner()
     if result.empty:
         print("No data returned.")
